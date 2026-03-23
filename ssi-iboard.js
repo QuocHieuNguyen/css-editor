@@ -2,17 +2,11 @@
 const element = document.getElementById('stock-detail-modal');
 
 if (element) {
-    // Lấy tất cả các style đang được áp dụng (bao gồm cả từ file CSS bên ngoài)
-    const styles = window.getComputedStyle(element);
+    // 2. Ghi đè giá trị của biến --tw-scale-x trực tiếp vào style của phần tử
+    // Việc này sẽ ưu tiên cao hơn class .scale-100 trong CSS
+    element.style.setProperty('--tw-scale-x', '1.2');
     
-    console.log("Danh sách các style của div #detail-iddsd:");
-    
-    // In ra toàn bộ các thuộc tính style và giá trị tương ứng
-    for (let i = 0; i < styles.length; i++) {
-        const prop = styles[i];
-        const value = styles.getPropertyValue(prop);
-        console.log(`${prop}: ${value}`);
-    }
+    console.log("Đã cập nhật --tw-scale-x thành 1.2");
 } else {
     console.log("Không tìm thấy phần tử có id 'detail-iddsd'");
 }
