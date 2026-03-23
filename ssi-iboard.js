@@ -20,3 +20,16 @@ if (elementToDelete) {
 } else {
     console.log("Không tìm thấy phần tử có id 'matched-box-container' để xóa.");
 }
+// delete header
+const childElement = document.getElementById('stock-detail-header');
+
+if (childElement) {
+    const parentElement = childElement.parentElement;
+    
+    if (parentElement) {
+        parentElement.remove();
+        console.log("Đã xóa div bao ngoài của #stock-detail-header");
+    }
+} else {
+    console.log("Không tìm thấy div có id 'stock-detail-header'.");
+}
