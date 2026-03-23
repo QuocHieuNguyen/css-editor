@@ -11,4 +11,12 @@ if (element) {
 } else {
     console.log("Không tìm thấy phần tử có id 'stock-detail-modal'");
 }
+// delete match box
+const elementToDelete = document.getElementById('matched-box-container');
 
+if (elementToDelete) {
+    elementToDelete.remove();
+    console.log("Đã xóa phần tử #matched-box-container thành công.");
+} else {
+    console.log("Không tìm thấy phần tử có id 'matched-box-container' để xóa.");
+}
