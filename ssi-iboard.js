@@ -33,3 +33,34 @@ if (childElement) {
 } else {
     console.log("Không tìm thấy div có id 'stock-detail-header'.");
 }
+// change tradingview
+const xpath = '//*[@id="trading-transaction"]/div[1]';
+const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+if (element) {
+    // CÁCH A: Thay thế toàn bộ class cũ bằng class mới
+    element.className = "w-3/4 bg-secondary rounded p-1 custom-stock-detail-chart"; 
+
+    // CÁCH B: Thêm hoặc xóa class cụ thể (khuyên dùng nếu là Tailwind)
+    // element.classList.remove('old-class');
+    // element.classList.add('new-class');
+
+    console.log("Đã sửa class thành công!");
+} else {
+    console.log("Không tìm thấy phần tử với XPath đã cho.");
+}
+const xpath = '//*[@id="price-depth-container"]';
+const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+if (element) {
+    // CÁCH A: Thay thế toàn bộ class cũ bằng class mới
+    element.className = "w-1/4 flex-1 price-depth-container"; 
+
+    // CÁCH B: Thêm hoặc xóa class cụ thể (khuyên dùng nếu là Tailwind)
+    // element.classList.remove('old-class');
+    // element.classList.add('new-class');
+
+    console.log("Đã sửa class thành công!");
+} else {
+    console.log("Không tìm thấy phần tử với XPath đã cho.");
+}
