@@ -34,7 +34,7 @@ if (childElement) {
     console.log("Không tìm thấy div có id 'stock-detail-header'.");
 }
 // change tradingview
-const xpath = '//*[@id="trading-transaction"]/div[1]';
+var xpath = '//*[@id="trading-transaction"]/div[1]';
 var element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
 if (element) {
@@ -49,7 +49,7 @@ if (element) {
 } else {
     console.log("Không tìm thấy phần tử với XPath đã cho.");
 }
-const xpath = '//*[@id="price-depth-container"]';
+var xpath = '//*[@id="price-depth-container"]';
 var element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
 if (element) {
