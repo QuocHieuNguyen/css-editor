@@ -1,5 +1,5 @@
 // Tìm phần tử theo ID
-const element = document.getElementById('stock-detail-modal');
+var element = document.getElementById('stock-detail-modal');
 
 if (element) {
     // 2. Ghi đè giá trị của biến --tw-scale-x trực tiếp vào style của phần tử
@@ -35,7 +35,7 @@ if (childElement) {
 }
 // change tradingview
 const xpath = '//*[@id="trading-transaction"]/div[1]';
-const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+var element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
 if (element) {
     // CÁCH A: Thay thế toàn bộ class cũ bằng class mới
@@ -50,7 +50,7 @@ if (element) {
     console.log("Không tìm thấy phần tử với XPath đã cho.");
 }
 const xpath = '//*[@id="price-depth-container"]';
-const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+var element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
 if (element) {
     // CÁCH A: Thay thế toàn bộ class cũ bằng class mới
