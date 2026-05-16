@@ -1,6 +1,6 @@
 (function() {
     let intervalId = null;
-
+    let intervalAmount = 5000;
     // Hàm thực hiện giả lập ấn nút mũi tên xuống
     function pressArrowDown() {
         const target = document.activeElement || document.body;
@@ -28,7 +28,7 @@
         } else {
             // Nếu đang tắt -> Bật lên
             pressArrowDown(); // Chạy ngay lần đầu
-            intervalId = setInterval(pressArrowDown, 5000); // Lặp mỗi 5 giây
+            intervalId = setInterval(pressArrowDown, intervalAmount); // Lặp mỗi 5 giây
             console.log('🟩 Bắt đầu tự động ấn mỗi 5 giây (Trạng thái: BẬT)');
         }
     }
@@ -43,7 +43,7 @@
 
     // Mặc định ban đầu: Tự động chạy luôn khi vừa paste code
     pressArrowDown();
-    intervalId = setInterval(pressArrowDown, 5000);
+    intervalId = setInterval(pressArrowDown, intervalAmount);
     console.log('✅ Tool đã hoạt động!');
     console.log('⌨️  Mẹo: Nhấp chuột vào trang web, sau đó bấm phím [Backspace] để BẬT/TẮT nhanh.');
 })();
