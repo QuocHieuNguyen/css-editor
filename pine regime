@@ -1,0 +1,587 @@
+//@version=6
+indicator("Intraday Regime Classifier", shorttitle="Regime", overlay=true, max_labels_count=500)
+
+
+//Ema Config 
+show_extra_ema = input.bool(false, title="Show EMA 9 & EMA 21?")
+show_extra_direction_ema = input.bool(false, title="Show Direction EMA?")
+ema_direction_length = input.int(200, title="EMA Direction Length", minval=1)
+
+show_og_ema = input.bool(false, title="Show EMA?")
+ema_long_length = input.int(200, title="EMA Long Length", minval=1)
+ema_short_length = input.int(50, title="EMA Short Length", minval=1)
+//--------------------------------------------------
+// Inputs
+//--------------------------------------------------
+orMinutes              = input.int(30, "Opening Range Minutes", minval=5)
+atrLen                 = input.int(14, "ATR Length", minval=1)
+effLookback            = input.int(20, "Efficiency Lookback", minval=5)
+vwapCrossLookback      = input.int(30, "VWAP Cross Lookback", minval=5)
+baselineRangeLookback  = input.int(50, "Baseline Intraday Range Lookback", minval=10)
+newsVolMultiplier      = input.float(1.8, "News Volatility Threshold", step=0.1)
+squeezeRangeMultiplier = input.float(0.7, "Squeeze Range Threshold", step=0.05)
+trendEffThreshold      = input.float(0.45, "Trend Efficiency ON Threshold", step=0.01)
+rangeEffThreshold      = input.float(0.25, "Range Efficiency ON Threshold", step=0.01)
+vwapCrossTrendMax      = input.int(3, "Max VWAP Crosses for Trend ON", minval=0)
+vwapCrossRangeMin      = input.int(6, "Min VWAP Crosses for Range ON", minval=1)
+driveBarsLimit         = input.int(12, "Opening Drive Max Bars From Open", minval=3)
+
+showBackground         = input.bool(true, "Show Background")
+showTable              = input.bool(true, "Show Summary Table")
+showOR                 = input.bool(true, "Show Opening Range")
+showVWAP               = input.bool(true, "Show VWAP")
+
+// Table row display toggles
+showSuggestedRow       = input.bool(true, "Table: Show Suggested Row")
+showExamplesRow        = input.bool(true, "Table: Show Examples Row")
+showTransitionRow      = input.bool(true, "Table: Show Transition Row")
+showManagementRow      = input.bool(true, "Table: Show Management Row")
+showEfficiencyRow      = input.bool(true, "Table: Show Efficiency Row")
+showVWAPCrossesRow     = input.bool(true, "Table: Show VWAP Crosses Row")
+showPctAboveVWAPRow    = input.bool(true, "Table: Show % Above VWAP Row")
+showRangeRatioRow      = input.bool(true, "Table: Show Range Ratio Row")
+showVolRatioRow        = input.bool(true, "Table: Show Vol Ratio Row")
+showDistVWAPRow        = input.bool(true, "Table: Show Dist/VWAP ATR Row")
+
+// Persistence settings
+useRegimePersistence   = input.bool(true, "Use Regime Persistence")
+persistenceBars        = input.int(3, "Persistence Bars", minval=1, maxval=20)
+
+//--------------------------------------------------
+// Hysteresis settings
+//--------------------------------------------------
+trendEffOffThreshold       = input.float(0.35, "Trend Efficiency OFF Threshold", step=0.01)
+rangeEffOffThreshold       = input.float(0.32, "Range Efficiency OFF Threshold", step=0.01)
+
+vwapCrossTrendOffMax       = input.int(5, "Max VWAP Crosses for Trend OFF", minval=0)
+vwapCrossRangeOffMin       = input.int(4, "Min VWAP Crosses for Range OFF", minval=0)
+
+squeezeRangeOffMultiplier  = input.float(0.85, "Squeeze Range OFF Threshold", step=0.05)
+newsVolOffMultiplier       = input.float(1.5, "News Volatility OFF Threshold", step=0.1)
+
+distVWAPTrendOn            = input.float(1.0, "Trend Dist/VWAP ATR ON", step=0.1)
+distVWAPTrendOff           = input.float(0.7, "Trend Dist/VWAP ATR OFF", step=0.1)
+
+distVWAPSqueezeOn          = input.float(0.8, "Squeeze Dist/VWAP ATR ON", step=0.1)
+distVWAPSqueezeOff         = input.float(1.0, "Squeeze Dist/VWAP ATR OFF", step=0.1)
+
+rangeRatioTrendOn          = input.float(0.9, "Trend Range Ratio ON", step=0.05)
+rangeRatioTrendOff         = input.float(0.75, "Trend Range Ratio OFF", step=0.05)
+
+rangeRatioRangeOn          = input.float(1.1, "Range Max Range Ratio ON", step=0.05)
+rangeRatioRangeOff         = input.float(1.25, "Range Max Range Ratio OFF", step=0.05)
+
+// 1. Define user-configurable color inputs in the settings panel
+c_trend     = input.color(color.new(color.green, 84),  title="Trend Day Color",           group="Regime Colors")
+c_open      = input.color(color.new(color.teal, 84),   title="Opening Drive Color",       group="Regime Colors")
+c_range     = input.color(color.new(color.orange, 84), title="Range Day Color",           group="Regime Colors")
+c_rotate    = input.color(color.new(color.yellow, 84), title="Rotational Day Color",      group="Regime Colors")
+c_squeeze   = input.color(color.new(color.blue, 84),   title="Squeeze Day Color",         group="Regime Colors")
+c_news      = input.color(color.new(color.red, 84),    title="News Volatility Day Color", group="Regime Colors")
+c_default   = input.color(color.new(color.gray, 88),   title="Default/Unknown Color",     group="Regime Colors")
+
+//--------------------------------------------------
+// Helpers
+//--------------------------------------------------
+sum_n(src, len) =>
+    ta.sma(src, len) * len
+
+//--------------------------------------------------
+// Session detection
+//--------------------------------------------------
+isNewDay = ta.change(time("D")) != 0
+
+var int barsFromOpen = 0
+barsFromOpen := isNewDay ? 0 : barsFromOpen + 1
+
+tfMinutes = timeframe.isintraday ? timeframe.multiplier : 1
+orBars = math.max(1, math.round(orMinutes / tfMinutes))
+
+var float orHigh = na
+var float orLow  = na
+
+if isNewDay
+    orHigh := high
+    orLow  := low
+else
+    if barsFromOpen < orBars
+        orHigh := math.max(nz(orHigh, high), high)
+        orLow  := math.min(nz(orLow, low), low)
+
+//--------------------------------------------------
+// Core metrics
+//--------------------------------------------------
+vwapValue = ta.vwap(hlc3)
+atrValue  = ta.atr(atrLen)
+
+// Directional efficiency
+netMove  = math.abs(close - close[effLookback])
+pathMove = sum_n(math.abs(close - close[1]), effLookback)
+efficiency = pathMove != 0 ? netMove / pathMove : 0.0
+
+// VWAP cross count
+crossEvent = ta.cross(close, vwapValue) ? 1.0 : 0.0
+vwapCrossCount = sum_n(crossEvent, vwapCrossLookback)
+
+// % bars above VWAP over lookback
+aboveVWAP = close > vwapValue ? 1.0 : 0.0
+pctAboveVWAP = sum_n(aboveVWAP, effLookback) / effLookback
+
+//--------------------------------------------------
+// Session range
+//--------------------------------------------------
+var float sessionHigh = na
+var float sessionLow  = na
+
+if isNewDay
+    sessionHigh := high
+    sessionLow  := low
+else
+    sessionHigh := math.max(nz(sessionHigh, high), high)
+    sessionLow  := math.min(nz(sessionLow, low), low)
+
+sessionRange = sessionHigh - sessionLow
+
+rangeBaseline = ta.sma(sessionRange, baselineRangeLookback)
+rangeRatio = not na(rangeBaseline) and rangeBaseline != 0 ? sessionRange / rangeBaseline : 1.0
+
+//--------------------------------------------------
+// Volatility shock
+//--------------------------------------------------
+atrBaseline = ta.sma(atrValue, 50)
+volRatio = atrBaseline != 0 ? atrValue / atrBaseline : 1.0
+
+//--------------------------------------------------
+// OR break logic
+//--------------------------------------------------
+aboveOR = not na(orHigh) and close > orHigh
+belowOR = not na(orLow) and close < orLow
+outsideOR = aboveOR or belowOR
+
+distFromVWAP = atrValue != 0 ? math.abs(close - vwapValue) / atrValue : 0.0
+
+//--------------------------------------------------
+// Base regime conditions
+//--------------------------------------------------
+trendOneSided = pctAboveVWAP > 0.75 or pctAboveVWAP < 0.25
+
+trendOnCond = (
+    efficiency > trendEffThreshold and
+    vwapCrossCount <= vwapCrossTrendMax and
+    trendOneSided and
+    rangeRatio > rangeRatioTrendOn
+)
+
+trendOffCond = (
+    efficiency < trendEffOffThreshold or
+    vwapCrossCount > vwapCrossTrendOffMax or
+    rangeRatio < rangeRatioTrendOff
+)
+
+rangeOnCond = (
+    efficiency < rangeEffThreshold and
+    vwapCrossCount >= vwapCrossRangeMin and
+    distFromVWAP < 1.2 and
+    rangeRatio <= rangeRatioRangeOn
+)
+
+rangeOffCond = (
+    efficiency > rangeEffOffThreshold or
+    vwapCrossCount < vwapCrossRangeOffMin or
+    distFromVWAP > 1.5 or
+    rangeRatio > rangeRatioRangeOff
+)
+
+squeezeOnCond = (
+    rangeRatio < squeezeRangeMultiplier and
+    volRatio < 0.9 and
+    distFromVWAP < distVWAPSqueezeOn and
+    vwapCrossCount >= 2
+)
+
+squeezeOffCond = (
+    rangeRatio > squeezeRangeOffMultiplier or
+    volRatio > 1.0 or
+    distFromVWAP > distVWAPSqueezeOff
+)
+
+newsOnCond = (
+    volRatio >= newsVolMultiplier and
+    rangeRatio > 1.2
+)
+
+newsOffCond = (
+    volRatio < newsVolOffMultiplier and
+    rangeRatio < 1.05
+)
+
+openingDriveOnCond = (
+    barsFromOpen <= driveBarsLimit and
+    outsideOR and
+    efficiency > trendEffThreshold and
+    vwapCrossCount <= vwapCrossTrendMax and
+    distFromVWAP > distVWAPTrendOn
+)
+
+openingDriveOffCond = (
+    barsFromOpen > driveBarsLimit or
+    efficiency < trendEffOffThreshold or
+    vwapCrossCount > vwapCrossTrendOffMax or
+    distFromVWAP < distVWAPTrendOff
+)
+
+//--------------------------------------------------
+// Hysteresis state tracking
+//--------------------------------------------------
+var bool trendState = false
+var bool rangeState = false
+var bool squeezeState = false
+var bool newsState = false
+var bool openingDriveState = false
+
+if isNewDay
+    trendState := false
+    rangeState := false
+    squeezeState := false
+    newsState := false
+    openingDriveState := false
+
+// News volatility
+if newsState
+    if newsOffCond
+        newsState := false
+else
+    if newsOnCond
+        newsState := true
+
+// Opening drive
+if openingDriveState
+    if openingDriveOffCond
+        openingDriveState := false
+else
+    if openingDriveOnCond
+        openingDriveState := true
+
+// Trend state
+if trendState
+    if trendOffCond
+        trendState := false
+else
+    if trendOnCond
+        trendState := true
+
+// Range state
+if rangeState
+    if rangeOffCond
+        rangeState := false
+else
+    if rangeOnCond
+        rangeState := true
+
+// Squeeze state
+if squeezeState
+    if squeezeOffCond
+        squeezeState := false
+else
+    if squeezeOnCond
+        squeezeState := true
+
+//--------------------------------------------------
+// Raw regime resolution
+//--------------------------------------------------
+isNewsVolRaw = newsState
+
+isOpeningDriveRaw = openingDriveState and not isNewsVolRaw
+
+isTrendDayRaw = trendState and not isNewsVolRaw and not isOpeningDriveRaw and not squeezeState
+
+isRangeDayRaw = rangeState and not isNewsVolRaw and not isOpeningDriveRaw and not isTrendDayRaw and not squeezeState
+
+isSqueezeRaw = squeezeState and not isNewsVolRaw and not isOpeningDriveRaw and not isTrendDayRaw
+
+isRotationalDayRaw = (
+    not isNewsVolRaw and
+    not isSqueezeRaw and
+    not isOpeningDriveRaw and
+    not isTrendDayRaw and
+    not isRangeDayRaw and
+    vwapCrossCount >= math.max(3, math.round(vwapCrossRangeMin * 0.7))
+)
+
+//--------------------------------------------------
+// Raw regime string
+//--------------------------------------------------
+string rawRegime =
+     isNewsVolRaw       ? "News Volatility Day" :
+     isSqueezeRaw       ? "Squeeze Day" :
+     isOpeningDriveRaw  ? "Opening Drive" :
+     isTrendDayRaw      ? "Trend Day" :
+     isRangeDayRaw      ? "Range Day" :
+     isRotationalDayRaw ? "Rotational Day" :
+                          "Unclear / Transitional"
+
+//--------------------------------------------------
+// Persistence layer
+//--------------------------------------------------
+var string confirmedRegime = "Unclear / Transitional"
+var string pendingRegime   = ""
+var int pendingCount       = 0
+var string priorConfirmedRegime = "Unclear / Transitional"
+
+if isNewDay
+    confirmedRegime := rawRegime
+    priorConfirmedRegime := confirmedRegime
+    pendingRegime := ""
+    pendingCount := 0
+
+if not useRegimePersistence
+    priorConfirmedRegime := confirmedRegime
+    confirmedRegime := rawRegime
+    pendingRegime := ""
+    pendingCount := 0
+else
+    if rawRegime == confirmedRegime
+        pendingRegime := ""
+        pendingCount := 0
+    else
+        if rawRegime == pendingRegime
+            pendingCount += 1
+        else
+            pendingRegime := rawRegime
+            pendingCount := 1
+
+        if pendingCount >= persistenceBars
+            priorConfirmedRegime := confirmedRegime
+            confirmedRegime := pendingRegime
+            pendingRegime := ""
+            pendingCount := 0
+
+//--------------------------------------------------
+// Final displayed regime
+//--------------------------------------------------
+string regime = confirmedRegime
+
+isNewsVol = regime == "News Volatility Day"
+isSqueeze = regime == "Squeeze Day"
+isOpeningDrive = regime == "Opening Drive"
+isTrendDay = regime == "Trend Day"
+isRangeDay = regime == "Range Day"
+isRotationalDay = regime == "Rotational Day"
+
+//--------------------------------------------------
+// Suggested setup
+//--------------------------------------------------
+string setup =
+     regime == "Trend Day"           ? "Pullback continuation / breakout retest" :
+     regime == "Opening Drive"       ? "First pullback / OR break hold" :
+     regime == "Range Day"           ? "Fade edges / mean revert to VWAP" :
+     regime == "Rotational Day"      ? "Trade rotations, avoid breakout chasing" :
+     regime == "Squeeze Day"         ? "Wait for expansion, then trade breakout" :
+     regime == "News Volatility Day" ? "Stand aside or wait for stabilization" :
+                                       "Reduce size / wait for clarity"
+
+//--------------------------------------------------
+// Trade examples
+//--------------------------------------------------
+string examples =
+     regime == "Trend Day"           ? "EMA pullback, VWAP hold, breakout retest" :
+     regime == "Opening Drive"       ? "OR break hold, first pullback, flag break" :
+     regime == "Range Day"           ? "Fade range edges, fade VWAP bands, reject highs/lows" :
+     regime == "Rotational Day"      ? "Fade VWAP bands, edge-to-VWAP, rejection scalp" :
+     regime == "Squeeze Day"         ? "Wait for squeeze break, range expansion, retest go" :
+     regime == "News Volatility Day" ? "Wait 15-30m, trade post-news base, avoid first spike" :
+                                       "Smaller size, wait for structure, avoid forcing setups"
+
+//--------------------------------------------------
+// Weakening logic (uses confirmed regime + raw conditions)
+//--------------------------------------------------
+trendWeakEff     = (trendEffThreshold + trendEffOffThreshold) / 2.0
+trendWeakCross   = math.round((vwapCrossTrendMax + vwapCrossTrendOffMax) / 2.0)
+trendWeakRange   = (rangeRatioTrendOn + rangeRatioTrendOff) / 2.0
+
+rangeWeakEff     = (rangeEffThreshold + rangeEffOffThreshold) / 2.0
+rangeWeakCross   = math.round((vwapCrossRangeMin + vwapCrossRangeOffMin) / 2.0)
+rangeWeakRange   = (rangeRatioRangeOn + rangeRatioRangeOff) / 2.0
+
+squeezeWeakRange = (squeezeRangeMultiplier + squeezeRangeOffMultiplier) / 2.0
+squeezeWeakDist  = (distVWAPSqueezeOn + distVWAPSqueezeOff) / 2.0
+newsWeakVol      = (newsVolMultiplier + newsVolOffMultiplier) / 2.0
+
+trendWeakening = isTrendDay and (
+    efficiency < trendWeakEff or
+    vwapCrossCount > trendWeakCross or
+    rangeRatio < trendWeakRange or
+    rawRegime != regime
+)
+
+rangeWeakening = isRangeDay and (
+    efficiency > rangeWeakEff or
+    vwapCrossCount < rangeWeakCross or
+    rangeRatio > rangeWeakRange or
+    distFromVWAP > 1.35 or
+    rawRegime != regime
+)
+
+squeezeWeakening = isSqueeze and (
+    rangeRatio > squeezeWeakRange or
+    distFromVWAP > squeezeWeakDist or
+    volRatio > 0.95 or
+    rawRegime != regime
+)
+
+openingDriveWeakening = isOpeningDrive and (
+    efficiency < trendWeakEff or
+    vwapCrossCount > trendWeakCross or
+    distFromVWAP < ((distVWAPTrendOn + distVWAPTrendOff) / 2.0) or
+    barsFromOpen > math.max(1, driveBarsLimit - 2) or
+    rawRegime != regime
+)
+
+newsWeakening = isNewsVol and (
+    volRatio < newsWeakVol or
+    rangeRatio < 1.125 or
+    rawRegime != regime
+)
+
+rotationalWeakening = isRotationalDay and (
+    trendOnCond or
+    rangeOnCond or
+    squeezeOnCond or
+    newsOnCond or
+    rawRegime != regime
+)
+
+isWeakening = trendWeakening or rangeWeakening or squeezeWeakening or openingDriveWeakening or newsWeakening or rotationalWeakening
+
+//--------------------------------------------------
+// Transition / management messaging
+//--------------------------------------------------
+regimeChanged = regime != regime[1]
+
+string transitionStatus =
+     useRegimePersistence and pendingRegime != "" ? "Pending: " + regime + " -> " + pendingRegime + " (" + str.tostring(pendingCount) + "/" + str.tostring(persistenceBars) + ")" :
+     regimeChanged ? "Confirmed: " + priorConfirmedRegime + " -> " + regime :
+     isWeakening   ? regime + " weakening" :
+                     "Stable"
+
+string managementNote =
+     useRegimePersistence and pendingRegime != "" ? "Hold structure-based exits; avoid fresh adds until confirmed" :
+     regimeChanged and regime == "Rotational Day"      ? "Tighten stops, stop chasing continuation" :
+     regimeChanged and regime == "Range Day"           ? "Take profits faster, favor fades not breaks" :
+     regimeChanged and regime == "Trend Day"           ? "Allow runners, use pullback-based trailing" :
+     regimeChanged and regime == "Squeeze Day"         ? "Reduce activity until expansion confirms" :
+     regimeChanged and regime == "News Volatility Day" ? "De-risk, avoid first impulse trades" :
+     isWeakening and regime == "Trend Day"             ? "Trail tighter under pullbacks / VWAP" :
+     isWeakening and regime == "Opening Drive"         ? "Take partials, avoid fresh breakout adds" :
+     isWeakening and regime == "Range Day"             ? "Shrink targets, wait for cleaner edges" :
+     isWeakening and regime == "Rotational Day"        ? "Quick scalps only, avoid holding for extension" :
+     isWeakening and regime == "Squeeze Day"           ? "Stay patient, wait for real expansion" :
+     isWeakening and regime == "News Volatility Day"   ? "Stand aside unless structure stabilizes" :
+                                                         "Manage by structure and original stop"
+
+//--------------------------------------------------
+// Visuals
+//--------------------------------------------------
+color regimeColor =
+     regime == "Trend Day"           ? c_trend   :
+     regime == "Opening Drive"       ? c_open    :
+     regime == "Range Day"           ? c_range   :
+     regime == "Rotational Day"      ? c_rotate  :
+     regime == "Squeeze Day"         ? c_squeeze :
+     regime == "News Volatility Day" ? c_news    :
+                                       c_default
+
+bgcolor(showBackground ? regimeColor : na)
+
+plot(showVWAP ? vwapValue : na, "VWAP", color=color.purple, linewidth=2)
+plot(showOR ? orHigh : na, "OR High", color=color.new(color.green, 15), linewidth=1, style=plot.style_linebr)
+plot(showOR ? orLow : na, "OR Low", color=color.new(color.red, 15), linewidth=1, style=plot.style_linebr)
+
+// plot EMA
+// Extra EMAs
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+ema200 = ta.ema(close, ema_long_length)
+ema50 = ta.ema(close, ema_short_length)
+
+ema_direction = ta.ema(close, ema_direction_length)
+
+show_ema_and_extra = 0
+if show_og_ema 
+    if show_extra_ema
+        show_ema_and_extra := 1
+    else
+        show_ema_and_extra := 2
+else
+    show_ema_and_extra := 0
+// Plot EMA 200
+plot(show_ema_and_extra == 2 ? ema200 : na, color=color.green, linewidth=1, title="EMA 200")
+plot(show_ema_and_extra == 2  ?ema50  : na, color=color.red, linewidth=1, title="EMA 50")
+// Conditionally plot EMA 9 & EMA 21
+plot(show_ema_and_extra == 1 ? ema9 : na, color=color.orange, linewidth=1, title="EMA 9")
+plot(show_ema_and_extra == 1  ? ema21 : na, color=color.blue, linewidth=1, title="EMA 21")
+
+plot(show_extra_direction_ema ? ema_direction : na, color=color.purple, linewidth=1, title="EMA 200")
+//--------------------------------------------------
+// Table
+//--------------------------------------------------
+var table t = table.new(position.top_right, 2, 14, border_width=1)
+
+if barstate.islast and showTable
+    table.clear(t, 0, 0, 1, 13)
+
+    int row = 0
+
+    table.cell(t, 0, row, "Regime", text_color=color.white, bgcolor=color.black)
+    table.cell(t, 1, row, regime, text_color=color.white, bgcolor=color.black)
+    row += 1
+
+    if showTransitionRow
+        table.cell(t, 0, row, "Transition", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, transitionStatus, text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showManagementRow
+        table.cell(t, 0, row, "Management", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, managementNote, text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showSuggestedRow
+        table.cell(t, 0, row, "Suggested", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, setup, text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showExamplesRow
+        table.cell(t, 0, row, "Examples", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, examples, text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showEfficiencyRow
+        table.cell(t, 0, row, "Efficiency", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(efficiency, "#.##"), text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showVWAPCrossesRow
+        table.cell(t, 0, row, "VWAP Crosses", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(vwapCrossCount, "#"), text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showPctAboveVWAPRow
+        table.cell(t, 0, row, "% Above VWAP", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(pctAboveVWAP * 100, "#.0") + "%", text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showRangeRatioRow
+        table.cell(t, 0, row, "Range Ratio", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(rangeRatio, "#.##"), text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showVolRatioRow
+        table.cell(t, 0, row, "Vol Ratio", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(volRatio, "#.##"), text_color=color.white, bgcolor=color.black)
+        row += 1
+
+    if showDistVWAPRow
+        table.cell(t, 0, row, "Dist/VWAP ATR", text_color=color.white, bgcolor=color.black)
+        table.cell(t, 1, row, str.tostring(distFromVWAP, "#.##"), text_color=color.white, bgcolor=color.black)
+        row += 1
